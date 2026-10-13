@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#4f46e5">
+<meta name="color-scheme" content="light dark">
+<title>Day Manager</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Day">
+<script>
+  // Apply the saved theme before anything is drawn so the page never flashes the wrong one
+  try {
+    const t = localStorage.getItem('dayManager.theme.v1');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch {}
+</script>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --card: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #4f46e5;
+    --danger: #dc2626;
+    --border: #e5e7eb;
+    --untracked: #cbd5e1;
+    --future: #eef0f4;
+  }
+  /* Theme: follows the device setting unless Light or Dark is picked in Settings (html[data-theme]).
+     The two dark blocks must stay identical. */
+  :root[data-theme="light"] { color-scheme: light; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111827;
+      --card: #1f2937;
+      --text: #f3f4f6;
+      --muted: #9ca3af;
+      --border: #374151;
+      --untracked: #4b5563;
+      --future: #273244;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111827;
+    --card: #1f2937;
+    --text: #f3f4f6;
+    --muted: #9ca3af;
+    --border: #374151;
+    --untracked: #4b5563;
+    --future: #273244;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-tap-highlight-color: transparent;
+  }
+  button { font-family: inherit; cursor: pointer; }
+  header {
+    background: var(--accent);
+    color: #fff;
+    padding: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  .menu-btn {
+    position: absolute;
+    right: 16px;
+    top: 12px;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 22px;
+  }
+
+  /* Header controls: Day / Week / Month / Quarter and Log / Charts share one pill style */
+  .pills {
+    display: flex;
+    gap: 4px;
+    margin-top: 14px;
+    padding: 4px;
+    background: rgba(0,0,0,0.18);
+    border-radius: 12px;
+  }
+  .pills button {
+    flex: 1;
+    padding: 8px 4px;
+    border: none;
+    border-radius: 9px;
+    background: none;
+    color: rgba(255,255,255,0.8);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .pills button.active { background: rgba(255,255,255,0.95); color: var(--accent); }
+  .period-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+  }
+  .period-nav > button {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: #fff;
+    font-size: 20px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+  }
+  .period-nav .period-label {
+    width: auto;
+    height: auto;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.12);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.25;
+  }
+  .period-label .dates { display: block; font-size: 11px; font-weight: 400; opacity: 0.85; }
+  .total { font-size: 32px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; margin-top: 10px; }
+  .total-sub { font-size: 12px; opacity: 0.85; text-align: center; }
+  .stats { display: flex; gap: 8px; margin-top: 10px; }
+  .stat {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.12);
+    text-align: center;
+  }
+  .stat-label { display: block; font-size: 11px; opacity: 0.85; }
+  .stat-value { display: block; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  main { padding: 16px; padding-bottom: 96px; max-width: 600px; margin: 0 auto; }
+  .card {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--muted); font-weight: 600; }
+  .card h2 small { font-weight: 400; font-size: 12px; }
+  .empty { text-align: center; color: var(--muted); padding: 32px 0; line-height: 1.6; }
+
+  /* Timer */
+  .timer-run { display: flex; align-items: center; gap: 12px; }
+  .timer-run .what { flex: 1; min-width: 0; }
+  .timer-run .what b { display: block; font-size: 16px; }
+  .timer-run .what span { font-size: 12px; color: var(--muted); }
+  .timer-run .clock { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pulse { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-right: 6px; animation: pulse 1.4s infinite; }
+  @keyframes pulse { 50% { opacity: 0.25; } }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  .chip .sw { width: 10px; height: 10px; border-radius: 50%; }
+  .chip.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); font-weight: 600; }
+
+  /* 24h strip */
+  .strip { position: relative; height: 34px; border-radius: 8px; overflow: hidden; background: var(--future); }
+  .strip.mini { height: 12px; border-radius: 4px; }
+  .strip > div { position: absolute; top: 0; bottom: 0; }
+  .strip .untracked { background: var(--untracked); left: 0; }
+  .strip .blk { border-right: 1px solid var(--card); }
+  .strip.tappable .blk, .strip.tappable .untracked { cursor: pointer; }
+  .strip .now { width: 2px; background: var(--text); }
+  .strip-ticks { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  /* Entry list */
+  .entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+  }
+  .entry:last-child { border-bottom: none; }
+  .entry .time { width: 92px; flex-shrink: 0; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .entry .bar { width: 4px; align-self: stretch; border-radius: 2px; flex-shrink: 0; }
+  .entry .what { flex: 1; min-width: 0; font-size: 15px; }
+  .entry .what small { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry .dur { font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .entry.gap .what { color: var(--muted); font-style: italic; }
+  .entry.gap .bar { background: repeating-linear-gradient(var(--untracked) 0 4px, transparent 4px 7px); }
+  .entry.gap .dur { color: var(--muted); font-weight: 500; }
+  .entry.gap .add { color: var(--accent); font-weight: 700; font-size: 18px; margin-left: 4px; }
+
+  /* Breakdown rows (multi-day log) */
+  .cat-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 14px; }
+  .cat-row .name { width: 128px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cat-row .bar { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .cat-row .bar div { height: 100%; }
+  .cat-row .amt { width: 78px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .cat-row .amt small { display: block; font-size: 11px; color: var(--muted); }
+  .day-row { padding: 10px 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .day-row:last-child { border-bottom: none; }
+  .day-row .top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 6px; }
+  .day-row .top span { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  /* Charts */
+  .chart-wrap { position: relative; width: 100%; max-width: 380px; margin: 0 auto; container-type: inline-size; }
+  .chart-wrap svg { display: block; width: 100%; height: auto; }
+  .seg { stroke: var(--card); stroke-width: 2; cursor: pointer; transition: opacity 0.15s; }
+  .has-sel .seg:not(.sel) { opacity: 0.22; }
+  .f-untracked { fill: var(--untracked); }
+  .f-future { fill: var(--future); }
+  .tick { stroke: var(--muted); stroke-width: 1; }
+  .tick-label { fill: var(--muted); font-size: 11px; }
+  .now-hand { stroke: var(--text); stroke-width: 2; stroke-linecap: round; }
+  .chart-center {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    pointer-events: none;
+  }
+  .chart-center .value { font-size: min(24px, 6.5cqw); font-weight: 700; white-space: nowrap; }
+  .chart-center .label { max-width: 100%; margin-top: 2px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chart-center .pct { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .grid { stroke: var(--border); stroke-width: 1; }
+  .axis-label { fill: var(--muted); font-size: 10px; }
+  .bar-hit { fill: transparent; cursor: pointer; }
+  .bar-hit.sel { fill: var(--accent); fill-opacity: 0.1; }
+  .bars rect.part { transition: opacity 0.15s; pointer-events: none; }
+  .has-sel .bars rect.part:not(.sel) { opacity: 0.18; }
+  .lg-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 8px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .lg-row.sel { background: var(--bg); }
+  .lg-row .key { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+  .lg-row .nm { flex: 1; min-width: 0; }
+  .lg-row .nm small { display: block; font-size: 11px; color: var(--muted); }
+  .lg-row .pc { width: 40px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .lg-row .am { width: 72px; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .up { color: #16a34a; }
+  .down { color: var(--danger); }
+  .bar-detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .bar-detail .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-weight: 600; font-size: 14px; }
+  .bar-detail .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .bar-detail .row span:last-child { font-variant-numeric: tabular-nums; }
+  .link-btn { border: none; background: none; color: var(--accent); font-size: 13px; font-weight: 600; padding: 0; }
+
+  .fab {
+    position: fixed;
+    right: 20px;
+    bottom: calc(24px + env(safe-area-inset-bottom));
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-size: 30px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    z-index: 15;
+  }
+
+  /* Modals (bottom sheets) */
+  .modal-bg {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 20;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--card);
+    width: 100%;
+    max-width: 600px;
+    border-radius: 16px 16px 0 0;
+    padding: 20px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal h3 { margin: 0 0 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  input, select {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: inherit;
+  }
+  .time-row { display: flex; gap: 8px; }
+  .time-row > div { flex: 1; min-width: 0; }
+  .dur-hint { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  .dur-hint b { color: var(--text); }
+  .segmented.overnight { margin-top: 10px; }
+  .segmented.overnight button { font-size: 13px; }
+  .sleep-card { display: flex; align-items: center; gap: 12px; }
+  .sleep-card .what { flex: 1; min-width: 0; }
+  .sleep-card .what b { display: block; font-size: 15px; }
+  .sleep-card .what span { font-size: 13px; color: var(--muted); }
+  .btn-row { display: flex; gap: 8px; margin-top: 20px; }
+  .btn {
+    flex: 1;
+    padding: 14px;
+    font-size: 16px;
+    border-radius: 8px;
+    border: none;
+    font-weight: 600;
+  }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.secondary { background: var(--border); color: var(--text); }
+  .btn.danger { background: var(--danger); color: #fff; }
+  .btn.small { flex: none; padding: 10px 16px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
+  .setting-label { margin: 20px 0 6px; font-size: 13px; color: var(--muted); }
+  .segmented {
+    display: flex;
+    padding: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .segmented button {
+    flex: 1;
+    padding: 9px 6px;
+    border: none;
+    border-radius: 9px;
+    background: none;
+    color: var(--muted);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .segmented button.active { background: var(--accent); color: #fff; }
+
+  /* Activities manager */
+  .act-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .act-row input.emoji { width: 52px; flex: none; text-align: center; padding: 10px 4px; }
+  .act-row input.nm { flex: 1; min-width: 0; padding: 10px; }
+  .act-row input[type=color] { width: 44px; height: 44px; flex: none; padding: 3px; }
+  .act-row .del { width: 40px; height: 44px; flex: none; border: none; border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 16px; }
+  .act-row .add { flex: none; }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(96px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    background: var(--text);
+    color: var(--card);
+    padding: 10px 16px;
+    border-radius: 999px;
+    font-size: 14px;
+    z-index: 30;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⏱ Day Manager</h1>
+  <button class="menu-btn" onclick="openModal('settingsModal')" aria-label="Settings">⋮</button>
+  <nav class="pills" id="periodPills">
+    <button data-period="day">Day</button>
+    <button data-period="week">Week</button>
+    <button data-period="month">Month</button>
+    <button data-period="quarter">Quarter</button>
+  </nav>
+  <div class="period-nav">
+    <button onclick="shiftPeriod(-1)" aria-label="Previous">‹</button>
+    <button class="period-label" id="periodLabel" onclick="goToday()" title="Jump to today"></button>
+    <button onclick="shiftPeriod(1)" aria-label="Next">›</button>
+  </div>
+  <div class="total" id="totalTracked"></div>
+  <div class="total-sub" id="totalSub"></div>
+  <div class="stats" id="stats"></div>
+  <nav class="pills" id="tabPills">
+    <button data-tab="log">Log</button>
+    <button data-tab="charts">Charts</button>
+  </nav>
+</header>
+
+<main>
+  <section id="logView"></section>
+  <section id="chartsView" hidden></section>
+</main>
+
+<button class="fab" onclick="openAdd()" aria-label="Log time">+</button>
+<div class="toast" id="toast" role="status"></div>
+
+<!-- Add / edit a block of time -->
+<div class="modal-bg" id="entryModal" onclick="if (event.target === this) closeModal('entryModal')">
+  <div class="modal">
+    <h3 id="entryTitle">Log time</h3>
+    <form id="entryForm">
+      <label>Activity</label>
+      <div class="chips" id="actPicker"></div>
+      <label for="entryDate">Date</label>
+      <input type="date" id="entryDate" required>
+      <div class="time-row">
+        <div>
+          <label for="entryStart">From</label>
+          <input type="time" id="entryStart" required>
+        </div>
+        <div>
+          <label for="entryEnd">To</label>
+          <input type="time" id="entryEnd" required>
+        </div>
+      </div>
+      <div class="segmented overnight" id="overnightToggle" hidden>
+        <button type="button" data-overnight="before">🌙 From the night before</button>
+        <button type="button" data-overnight="after">Into the next day ☀️</button>
+      </div>
+      <div class="dur-hint" id="durHint"></div>
+      <label for="entryNote">Note (optional)</label>
+      <input type="text" id="entryNote" placeholder="e.g. Team standup" autocomplete="off">
+      <div class="btn-row">
+        <button type="button" class="btn danger" id="entryDelete">Delete</button>
+        <button type="button" class="btn secondary" onclick="closeModal('entryModal')">Cancel</button>
+        <button type="submit" class="btn primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Manage activities -->
+<div class="modal-bg" id="actsModal" onclick="if (event.target === this) closeModal('actsModal')">
+  <div class="modal">
+    <h3>Activities</h3>
+    <div id="actList"></div>
+    <form class="act-row" id="newActForm" style="margin-top:16px">
+      <input class="emoji" id="newActEmoji" value="⭐" maxlength="8" aria-label="Emoji">
+      <input class="nm" id="newActName" placeholder="New activity" required>
+      <input type="color" id="newActColor" value="#0891b2" aria-label="Colour">
+      <button type="submit" class="btn primary small add">Add</button>
+    </form>
+    <p class="hint">Edit an emoji, name or colour and it saves straight away. An activity can only be deleted once no logged time uses it.</p>
+    <div class="btn-row"><button class="btn secondary" onclick="closeModal('actsModal')">Done</button></div>
+  </div>
+</div>
+
+<!-- Settings / backup -->
+<div class="modal-bg" id="settingsModal" onclick="if (event.target === this) closeModal('settingsModal')">
+  <div class="modal">
+    <h3>Settings</h3>
+    <div class="setting-label">Theme</div>
+    <div class="segmented" id="themeToggle">
+      <button type="button" data-theme-opt="system">📱 System</button>
+      <button type="button" data-theme-opt="light">☀️ Light</button>
+      <button type="button" data-theme-opt="dark">🌙 Dark</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" onclick="closeModal('settingsModal'); openActs()">Manage activities</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn secondary" onclick="exportData()">Export backup</button>
+      <button class="btn secondary" onclick="document.getElementById('importFile').click()">Import backup</button>
+    </div>
+    <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="importData(event)">
+    <p class="hint">
+      Your data lives in this browser on this device. If you clear the browser's data, your logged time
+      is deleted too, so export a backup now and then.
+    </p>
+    <div class="btn-row"><button class="btn secondary" onclick="closeModal('settingsModal')">Close</button></div>
+  </div>
+</div>
+
+<script>
+  const KEYS = {
+    entries: 'dayManager.entries.v1',
+    acts: 'dayManager.activities.v1',
+    ui: 'dayManager.ui.v1',
+    timer: 'dayManager.timer.v1',
+    theme: 'dayManager.theme.v1',
+  };
+  const DAY = 1440; // minutes
+  const DEFAULT_ACTS = [
+    { id: 'sleep', name: 'Sleep', emoji: '😴', color: '#6366f1' },
+    { id: 'work', name: 'Work', emoji: '💼', color: '#0284c7' },
+    { id: 'commute', name: 'Commute', emoji: '🚗', color: '#d97706' },
+    { id: 'meals', name: 'Meals', emoji: '🍽️', color: '#e11d48' },
+    { id: 'exercise', name: 'Exercise', emoji: '🏃', color: '#16a34a' },
+    { id: 'people', name: 'Family & friends', emoji: '👨‍👩‍👧', color: '#db2777' },
+    { id: 'chores', name: 'Chores', emoji: '🧹', color: '#a16207' },
+    { id: 'leisure', name: 'Leisure & screen', emoji: '📺', color: '#9333ea' },
+    { id: 'learning', name: 'Learning', emoji: '📚', color: '#0d9488' },
+    { id: 'care', name: 'Personal care', emoji: '🚿', color: '#ea580c' },
+  ];
+  // Pseudo-activities for time nobody logged: past = untracked, not happened yet = still to come
+  const UNTRACKED = { id: '_untracked', name: 'Untracked', emoji: '', color: 'var(--untracked)', cls: 'f-untracked' };
+  const FUTURE = { id: '_future', name: 'Still to come', emoji: '', color: 'var(--future)', cls: 'f-future' };
+
+  // ---------- Helpers ----------
+  const $ = id => document.getElementById(id);
+  const pad = n => String(n).padStart(2, '0');
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const toKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const fromKey = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+  const addDays = (k, n) => { const d = fromKey(k); d.setDate(d.getDate() + n); return toKey(d); };
+  const todayKey = () => toKey(new Date());
+  const nowMin = () => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); };
+  const minToTime = m => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+  const timeToMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  function eachDay(start, end) {
+    const out = [];
+    for (let k = start; k <= end; k = addDays(k, 1)) out.push(k);
+    return out;
+  }
+  function fmtDur(m) {
+    m = Math.round(m);
+    const h = Math.floor(m / 60), r = m % 60;
+    if (h && r) return `${h}h ${r}m`;
+    return h ? `${h}h` : `${r}m`;
+  }
+  const fmtDate = (k, opts) => fromKey(k).toLocaleDateString(undefined, opts);
+  function load(key, fallback) {
+    try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+  }
+  let toastTimer;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  }
+
+  // ---------- State ----------
+  // entry: { id, date: 'YYYY-MM-DD', start, end, act, note } with 0 <= start < end <= 1440 (minutes).
+  // Anything crossing midnight is stored as one entry per day, so a day never has to look at its neighbours.
+  let activities = load(KEYS.acts, null) || DEFAULT_ACTS.map(a => ({ ...a }));
+  let entries = load(KEYS.entries, []);
+  let timer = load(KEYS.timer, null); // { act, startedAt (ms) } while running
+  let ui = Object.assign({ tab: 'log', period: 'day', lastAct: 'work' }, load(KEYS.ui, {}));
+  ui.anchor = todayKey(); // always open on today
+  let sel = null;    // activity id highlighted in the charts
+  let barSel = null; // index of the tapped bar in the bar chart
+  let index = new Map();
+
+  function reindex() {
+    index = new Map();
+    for (const e of entries) {
+      if (!index.has(e.date)) index.set(e.date, []);
+      index.get(e.date).push(e);
+    }
+    for (const list of index.values()) list.sort((a, b) => a.start - b.start);
+  }
+  const dayEntries = k => index.get(k) || [];
+  function persist() {
+    localStorage.setItem(KEYS.entries, JSON.stringify(entries));
+    localStorage.setItem(KEYS.acts, JSON.stringify(activities));
+    reindex();
+  }
+  function saveUi() {
+    localStorage.setItem(KEYS.ui, JSON.stringify({ tab: ui.tab, period: ui.period, lastAct: ui.lastAct }));
+  }
+  function saveTimer() {
+    if (timer) localStorage.setItem(KEYS.timer, JSON.stringify(timer));
+    else localStorage.removeItem(KEYS.timer);
+  }
+  const actById = id => activities.find(a => a.id === id) || { id, name: 'Deleted activity', emoji: '❔', color: '#94a3b8' };
+  const actLabel = a => (a.emoji ? a.emoji + ' ' : '') + esc(a.name);
+
+  // ---------- Periods ----------
+  function periodRange(p = ui.period, a = ui.anchor) {
+    const d = fromKey(a);
+    if (p === 'day') return { start: a, end: a };
+    if (p === 'week') {
+      const start = addDays(a, -((d.getDay() + 6) % 7)); // weeks start on Monday
+      return { start, end: addDays(start, 6) };
+    }
+    if (p === 'month') return { start: toKey(new Date(d.getFullYear(), d.getMonth(), 1)), end: toKey(new Date(d.getFullYear(), d.getMonth() + 1, 0)) };
+    const q = Math.floor(d.getMonth() / 3) * 3;
+    return { start: toKey(new Date(d.getFullYear(), q, 1)), end: toKey(new Date(d.getFullYear(), q + 3, 0)) };
+  }
+  function shiftedAnchor(n, p = ui.period, a = ui.anchor) {
+    const d = fromKey(a);
+    if (p === 'day') return addDays(a, n);
+    if (p === 'week') return addDays(a, 7 * n);
+    return toKey(new Date(d.getFullYear(), d.getMonth() + (p === 'month' ? n : 3 * n), 1));
+  }
+  function shiftPeriod(n) {
+    ui.anchor = shiftedAnchor(n);
+    barSel = null;
+    render();
+  }
+  function goToday() {
+    ui.anchor = todayKey();
+    barSel = null;
+    render();
+  }
+  function setPeriod(p) {
+    ui.period = p;
+    barSel = null;
+    saveUi();
+    render();
+  }
+  function periodTitle() {
+    const r = periodRange(), t = todayKey();
+    const sameYear = fromKey(r.start).getFullYear() === new Date().getFullYear();
+    if (ui.period === 'day') {
+      const name = r.start === t ? 'Today' : r.start === addDays(t, -1) ? 'Yesterday' : fmtDate(r.start, { weekday: 'long' });
+      return { title: name, dates: fmtDate(r.start, { weekday: 'short', day: 'numeric', month: 'short', year: sameYear ? undefined : 'numeric' }) };
+    }
+    if (ui.period === 'week') {
+      const thisWeek = periodRange('week', t).start;
+      const name = r.start === thisWeek ? 'This week' : r.start === addDays(thisWeek, -7) ? 'Last week' : 'Week';
+      return { title: name, dates: `${fmtDate(r.start, { day: 'numeric', month: 'short' })} – ${fmtDate(r.end, { day: 'numeric', month: 'short', year: 'numeric' })}` };
+    }
+    if (ui.period === 'month') return { title: fmtDate(r.start, { month: 'long', year: 'numeric' }), dates: '' };
+    const d = fromKey(r.start);
+    return { title: `Q${d.getMonth() / 3 + 1} ${d.getFullYear()}`, dates: `${fmtDate(r.start, { month: 'short' })} – ${fmtDate(r.end, { month: 'short' })}` };
+  }
+  const prevName = () => ({ day: 'the day before', week: 'last week', month: 'last month', quarter: 'last quarter' }[ui.period]);
+
+  // ---------- Totals ----------
+  // How much of a day has happened: all of it in the past, up to now today, none of it in the future
+  function capOf(k) {
+    const t = todayKey();
+    return k > t ? 0 : k === t ? nowMin() : DAY;
+  }
+  function daySummary(k) {
+    const acts = {};
+    let tracked = 0, trackedPast = 0;
+    const cap = capOf(k);
+    for (const e of dayEntries(k)) {
+      const d = e.end - e.start;
+      acts[e.act] = (acts[e.act] || 0) + d;
+      tracked += d;
+      trackedPast += Math.max(0, Math.min(e.end, cap) - e.start);
+    }
+    const untracked = cap - trackedPast;
+    return { acts, tracked, untracked, future: DAY - tracked - untracked, cap, days: 1 };
+  }
+  function summarize(days) {
+    const s = { acts: {}, tracked: 0, untracked: 0, future: 0, cap: 0, days: days.length };
+    s.full = { acts: {}, tracked: 0, untracked: 0, days: 0 }; // finished days only, for averages
+    for (const k of days) {
+      const d = daySummary(k);
+      for (const [id, m] of Object.entries(d.acts)) s.acts[id] = (s.acts[id] || 0) + m;
+      s.tracked += d.tracked;
+      s.untracked += d.untracked;
+      s.future += d.future;
+      s.cap += d.cap;
+      if (d.cap === DAY) {
+        for (const [id, m] of Object.entries(d.acts)) s.full.acts[id] = (s.full.acts[id] || 0) + m;
+        s.full.tracked += d.tracked;
+        s.full.untracked += d.untracked;
+        s.full.days++;
+      }
+    }
+    s.total = s.days * DAY;
+    return s;
+  }
+  // Per-day average over finished days only, so a half-done today doesn't skew it. null if none finished yet.
+  function avg(s, id) {
+    if (!s.full.days) return null;
+    const m = id === '_tracked' ? s.full.tracked : id === UNTRACKED.id ? s.full.untracked : (s.full.acts[id] || 0);
+    return m / s.full.days;
+  }
+  // What shares are out of: the whole 24h for a day; for longer periods everything except time still to come
+  // (the hours that have passed, plus anything already logged ahead)
+  const base = s => ui.period === 'day' ? s.total : s.total - s.future;
+  const baseText = s => ui.period === 'day' || !s.future ? `${s.total / 60}h` : `${fmtDur(base(s))} so far`;
+  // Activities with time, biggest first, followed by untracked and still-to-come
+  function slices(s) {
+    const acts = activities.filter(a => s.acts[a.id])
+      .concat(Object.keys(s.acts).filter(id => !activities.some(a => a.id === id)).map(actById))
+      .map(a => ({ ...a, min: s.acts[a.id] }))
+      .sort((a, b) => b.min - a.min);
+    if (s.untracked > 0) acts.push({ ...UNTRACKED, min: s.untracked });
+    if (s.future > 0 && ui.period === 'day') acts.push({ ...FUTURE, min: s.future });
+    return acts;
+  }
+
+  // ---------- Rendering ----------
+  function render() {
+    const r = periodRange();
+    const days = eachDay(r.start, r.end);
+    const s = summarize(days);
+
+    document.querySelectorAll('#periodPills button').forEach(b => b.classList.toggle('active', b.dataset.period === ui.period));
+    document.querySelectorAll('#tabPills button').forEach(b => b.classList.toggle('active', b.dataset.tab === ui.tab));
+    const pt = periodTitle();
+    $('periodLabel').innerHTML = `${esc(pt.title)}${pt.dates ? `<span class="dates">${esc(pt.dates)}</span>` : ''}`;
+    $('totalTracked').textContent = fmtDur(s.tracked);
+    $('totalSub').textContent = ui.period !== 'day' && s.cap > 0 && s.cap < s.total
+      ? `tracked so far · day ${Math.ceil(s.cap / DAY)} of ${s.days}` : `tracked of ${s.total / 60}h`;
+    const top = slices(s).find(a => !a.id.startsWith('_'));
+    const stats = [
+      ['Untracked', fmtDur(s.untracked)],
+      ['Most time', top ? `${top.emoji} ${fmtDur(top.min)}` : '—'],
+    ];
+    if (ui.period !== 'day') stats.push(['Tracked / day', avg(s, '_tracked') === null ? '—' : fmtDur(avg(s, '_tracked'))]);
+    $('stats').innerHTML = stats.map(([l, v]) => `<div class="stat"><span class="stat-label">${l}</span><span class="stat-value">${esc(v)}</span></div>`).join('');
+
+    $('logView').hidden = ui.tab !== 'log';
+    $('chartsView').hidden = ui.tab !== 'charts';
+    if (ui.tab === 'log') renderLog(r, days, s);
+    else renderCharts(r, days, s);
+  }
+
+  // A 0–24h bar for one day. Tappable strips open entries / fill gaps.
+  function stripHtml(k, { mini = false, tappable = false } = {}) {
+    const cap = capOf(k);
+    const pct = m => (m / DAY * 100).toFixed(3) + '%';
+    let html = `<div class="strip${mini ? ' mini' : ''}${tappable ? ' tappable' : ''}">`;
+    if (cap > 0) html += `<div class="untracked" style="width:${pct(cap)}"${tappable ? ' data-action="fill-first"' : ''}></div>`;
+    for (const e of dayEntries(k)) {
+      html += `<div class="blk" style="left:${pct(e.start)};width:${pct(e.end - e.start)};background:${actById(e.act).color}"` +
+        (tappable ? ` data-action="edit" data-id="${e.id}" title="${esc(actById(e.act).name)} ${minToTime(e.start)}–${minToTime(e.end)}"` : '') + '></div>';
+    }
+    if (k === todayKey() && !mini) html += `<div class="now" style="left:${pct(cap)}"></div>`;
+    return html + '</div>';
+  }
+  const ticksHtml = () => `<div class="strip-ticks"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
+
+  function timerCardHtml(showStart) {
+    if (timer) {
+      const a = actById(timer.act);
+      const started = new Date(timer.startedAt);
+      return `<div class="card">
+        <div class="timer-run">
+          <div class="what"><b><span class="pulse"></span>${actLabel(a)}</b>
+            <span>since ${started.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}${toKey(started) !== todayKey() ? ' ' + fmtDate(toKey(started), { day: 'numeric', month: 'short' }) : ''}</span></div>
+          <div class="clock" id="timerClock">${timerText()}</div>
+          <button class="btn primary small" data-action="stop-timer">Stop</button>
+        </div>
+        <p class="hint" style="margin-bottom:0">Tap another activity to switch straight to it.</p>
+        <div class="chips" style="margin-top:10px">${activities.filter(x => x.id !== timer.act).map(chipHtml('start-timer')).join('')}</div>
+      </div>`;
+    }
+    if (!showStart) return '';
+    return `<div class="card"><h2>Start a timer</h2><div class="chips">${activities.map(chipHtml('start-timer')).join('')}</div></div>`;
+  }
+  const chipHtml = (action, activeId) => a =>
+    `<button type="button" class="chip${a.id === activeId ? ' active' : ''}" data-action="${action}" data-act="${a.id}"><span class="sw" style="background:${a.color}"></span>${actLabel(a)}</button>`;
+  function timerText() {
+    const s = Math.max(0, Math.floor((Date.now() - timer.startedAt) / 1000));
+    return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+  }
+
+  // Morning prompt to log last night, until something covers the start of today
+  const sleepAct = () => activities.find(a => a.id === 'sleep') || activities.find(a => /sleep/i.test(a.name));
+  function usualSleep() {
+    // Bed and wake times from the most recent overnight sleep, else 23:00 → 07:00
+    const act = sleepAct();
+    const last = entries.filter(e => e.act === act.id && e.grp && e.start === 0)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .find(e => entries.some(x => x.grp === e.grp && x.end === DAY));
+    if (!last) return { bed: 23 * 60, wake: 7 * 60 };
+    return { bed: entries.find(x => x.grp === last.grp && x.end === DAY).start, wake: last.end };
+  }
+  function sleepCardHtml(k) {
+    const act = sleepAct(), first = dayEntries(k)[0];
+    if (!act || k !== todayKey() || (first && first.start === 0) || nowMin() >= 15 * 60 || timer?.act === act.id) return '';
+    const { bed, wake } = usualSleep();
+    return `<div class="card sleep-card">
+      <div class="what"><b>${act.emoji} Last night's sleep</b><span>Bed ${minToTime(bed)} → up ${minToTime(wake)} · ${fmtDur(DAY - bed + wake)}</span></div>
+      <button class="btn primary small" data-action="log-sleep">Log it</button></div>`;
+  }
+
+  function renderLog(r, days, s) {
+    const el = $('logView');
+    if (ui.period === 'day') {
+      const k = r.start, cap = capOf(k);
+      let html = timerCardHtml(k === todayKey()) + sleepCardHtml(k);
+      html += `<div class="card"><h2>Your 24 hours</h2>${stripHtml(k, { tappable: true })}${ticksHtml()}</div>`;
+      // Entries in order, with the untracked gaps between them so they're easy to fill in
+      const rows = [];
+      let cur = 0;
+      for (const e of dayEntries(k)) {
+        if (e.start > cur && cur < cap) rows.push({ gap: [cur, Math.min(e.start, cap)] });
+        rows.push({ e });
+        cur = Math.max(cur, e.end);
+      }
+      if (cur < cap) rows.push({ gap: [cur, cap] });
+      if (!rows.length) {
+        html += `<div class="empty">${cap === 0 ? 'This day hasn\'t happened yet.' : 'Nothing logged yet.'}<br>Tap + to log some time, or start a timer.</div>`;
+      } else {
+        html += `<div class="card">` + rows.map(row => {
+          if (row.gap) {
+            const [a, b] = row.gap;
+            return `<div class="entry gap" data-action="fill" data-start="${a}" data-end="${b}">
+              <span class="time">${minToTime(a)} – ${minToTime(b)}</span><span class="bar"></span>
+              <span class="what">Untracked</span><span class="dur">${fmtDur(b - a)}</span><span class="add">+</span></div>`;
+          }
+          const e = row.e, a = actById(e.act);
+          return `<div class="entry" data-action="edit" data-id="${e.id}">
+            <span class="time">${minToTime(e.start)} – ${minToTime(e.end)}</span><span class="bar" style="background:${a.color}"></span>
+            <span class="what">${actLabel(a)}${e.note ? `<small>${esc(e.note)}</small>` : ''}</span><span class="dur">${fmtDur(e.end - e.start)}</span></div>`;
+        }).join('') + `</div>`;
+      }
+      el.innerHTML = html;
+      return;
+    }
+
+    let html = timerCardHtml(false);
+    const sl = slices(s).filter(a => a.id !== FUTURE.id);
+    const max = Math.max(1, ...sl.map(a => a.min));
+    html += `<div class="card"><h2>Where the time went <small>· total and per day</small></h2>` + (s.cap === 0
+      ? `<div class="empty">This period hasn't started yet.</div>`
+      : sl.map(a => `<div class="cat-row">
+          <span class="name">${a.emoji ? a.emoji + ' ' : ''}${esc(a.name)}</span>
+          <span class="bar"><div style="width:${a.min / max * 100}%;background:${a.color}"></div></span>
+          <span class="amt">${fmtDur(a.min)}${avg(s, a.id) === null ? '' : `<small>${fmtDur(avg(s, a.id))}/day</small>`}</span></div>`).join('')) + `</div>`;
+    const past = days.filter(k => capOf(k) > 0).reverse();
+    if (past.length) {
+      html += `<div class="card"><h2>Days</h2>` + past.map(k => `<div class="day-row" data-action="open-day" data-day="${k}">
+          <div class="top">${esc(fmtDate(k, { weekday: 'short', day: 'numeric', month: 'short' }))}<span>${fmtDur(daySummary(k).tracked)} tracked</span></div>
+          ${stripHtml(k, { mini: true })}</div>`).join('') + `</div>`;
+    }
+    el.innerHTML = html;
+  }
+
+  // ---------- Charts ----------
+  // Ring segment between radii r0..r1 from angle a0 to a1 (radians, clockwise from 12 o'clock)
+  function arcPath(cx, cy, r0, r1, a0, a1) {
+    if (a1 - a0 >= Math.PI * 2 - 1e-4) a1 = a0 + Math.PI * 2 - 1e-4;
+    const p = (r, a) => `${(cx + r * Math.sin(a)).toFixed(2)} ${(cy - r * Math.cos(a)).toFixed(2)}`;
+    const large = a1 - a0 > Math.PI ? 1 : 0;
+    return `M${p(r1, a0)}A${r1} ${r1} 0 ${large} 1 ${p(r1, a1)}L${p(r0, a1)}A${r0} ${r0} 0 ${large} 0 ${p(r0, a0)}Z`;
+  }
+  const fillAttr = a => a.cls ? `class="seg ${a.cls}${sel === a.id ? ' sel' : ''}"` : `class="seg${sel === a.id ? ' sel' : ''}" fill="${a.color}"`;
+
+  function centerHtml(s, W, cx, cy, r0) {
+    const box = r0 * 0.78;
+    const style = `left:${(cx - box) / W * 100}%;width:${box * 2 / W * 100}%;top:${(cy - box) / W * 100}%;height:${box * 2 / W * 100}%`;
+    let value, label, pct;
+    if (sel) {
+      const a = sel === UNTRACKED.id ? UNTRACKED : actById(sel);
+      const m = sel === UNTRACKED.id ? s.untracked : (s.acts[sel] || 0);
+      value = fmtDur(m);
+      label = (a.emoji ? a.emoji + ' ' : '') + a.name;
+      const av = ui.period === 'day' ? null : avg(s, sel);
+      pct = `${Math.round(m / base(s) * 100)}% of ${baseText(s)}` + (av === null ? '' : ` · ${fmtDur(av)}/day`);
+    } else {
+      value = fmtDur(s.tracked);
+      label = 'tracked';
+      pct = `of ${baseText(s)}`;
+    }
+    return `<div class="chart-center" style="${style}"><div class="value">${esc(value)}</div><div class="label">${esc(label)}</div><div class="pct">${esc(pct)}</div></div>`;
+  }
+
+  // Day: a 24-hour clock - each block sits at the time of day it happened
+  function clockHtml(k, s) {
+    const W = 360, cx = 180, cy = 180, r1 = 140, r0 = 96;
+    const ang = m => m / DAY * Math.PI * 2;
+    const cap = capOf(k);
+    let svg = `<path d="${arcPath(cx, cy, r0, r1, 0, Math.PI * 2)}" class="f-future" />`;
+    if (cap > 0) svg += `<path d="${arcPath(cx, cy, r0, r1, 0, ang(cap))}" class="seg f-untracked${sel === UNTRACKED.id ? ' sel' : ''}" data-sel="${UNTRACKED.id}" />`;
+    for (const e of dayEntries(k)) {
+      const a = actById(e.act);
+      svg += `<path d="${arcPath(cx, cy, r0, r1, ang(e.start), ang(e.end))}" ${fillAttr(a)} data-sel="${a.id}"><title>${esc(a.name)} ${minToTime(e.start)}–${minToTime(e.end)}</title></path>`;
+    }
+    for (let h = 0; h < 24; h++) {
+      const a = ang(h * 60), major = h % 6 === 0, rr = r1 + (major ? 9 : 5);
+      svg += `<line class="tick" x1="${cx + (r1 + 2) * Math.sin(a)}" y1="${cy - (r1 + 2) * Math.cos(a)}" x2="${cx + rr * Math.sin(a)}" y2="${cy - rr * Math.cos(a)}" />`;
+      if (h % 3 === 0) {
+        const lr = r1 + 22;
+        svg += `<text class="tick-label" x="${cx + lr * Math.sin(a)}" y="${cy - lr * Math.cos(a)}" text-anchor="middle" dominant-baseline="central"${major ? ' font-weight="600"' : ''}>${pad(h)}</text>`;
+      }
+    }
+    if (k === todayKey()) {
+      const a = ang(cap);
+      svg += `<line class="now-hand" x1="${cx + (r0 - 6) * Math.sin(a)}" y1="${cy - (r0 - 6) * Math.cos(a)}" x2="${cx + (r1 + 4) * Math.sin(a)}" y2="${cy - (r1 + 4) * Math.cos(a)}" />`;
+    }
+    return `<div class="chart-wrap${sel ? ' has-sel' : ''}"><svg viewBox="0 0 ${W} ${W}">${svg}</svg>${centerHtml(s, W, cx, cy, r0)}</div>`;
+  }
+
+  // Week+: share of all the hours in the period
+  function donutHtml(s) {
+    const W = 360, cx = 180, cy = 180, r1 = 160, r0 = 104;
+    let a0 = 0, svg = '';
+    for (const a of slices(s)) {
+      const a1 = a0 + a.min / base(s) * Math.PI * 2;
+      const clickable = a.id !== FUTURE.id;
+      svg += `<path d="${arcPath(cx, cy, r0, r1, a0, a1)}" ${fillAttr(a)}${clickable ? ` data-sel="${a.id}"` : ' style="cursor:default"'}><title>${esc(a.name)} ${fmtDur(a.min)}</title></path>`;
+      a0 = a1;
+    }
+    return `<div class="chart-wrap${sel ? ' has-sel' : ''}"><svg viewBox="0 0 ${W} ${W}">${svg}</svg>${centerHtml(s, W, cx, cy, r0)}</div>`;
+  }
+
+  function legendHtml(s) {
+    const prev = summarize(eachDay(...Object.values(periodRange(ui.period, shiftedAnchor(-1)))));
+    const multi = ui.period !== 'day';
+    return slices(s).map(a => {
+      const pseudo = a.id.startsWith('_');
+      let sub = '';
+      if (multi && avg(s, a.id) !== null) sub = `${fmtDur(avg(s, a.id))}/day`;
+      // Compare like with like: finished-day averages for longer periods, whole days for a day (not today so far)
+      if (!pseudo && a.id !== FUTURE.id && prev.full.tracked > 0 && (multi ? s.full.days > 0 : s.full.days === 1)) {
+        const now = multi ? avg(s, a.id) : a.min;
+        const before = avg(prev, a.id);
+        const diff = Math.round(now - before);
+        const txt = Math.abs(diff) < 5 ? `same as ${prevName()}` :
+          `<span class="${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '▲' : '▼'} ${fmtDur(Math.abs(diff))}${multi ? '/day' : ''}</span> vs ${prevName()}`;
+        sub = sub ? `${sub} · ${txt}` : txt;
+      }
+      return `<div class="lg-row${sel === a.id ? ' sel' : ''}"${a.id !== FUTURE.id ? ` data-sel="${a.id}"` : ''}>
+        <span class="key" style="background:${a.color}"></span>
+        <span class="nm">${a.emoji ? a.emoji + ' ' : ''}${esc(a.name)}${sub ? `<small>${sub}</small>` : ''}</span>
+        <span class="pc">${Math.round(a.min / base(s) * 100)}%</span>
+        <span class="am">${fmtDur(a.min)}</span></div>`;
+    }).join('');
+  }
+
+  // Bars: one per day for a week or month, one per week for a quarter (as that week's average day)
+  function bucketsFor(days) {
+    if (ui.period !== 'quarter') {
+      return days.map(k => {
+        const d = fromKey(k);
+        const label = ui.period === 'week' ? fmtDate(k, { weekday: 'short' })
+          : (d.getDate() === 1 || d.getDate() % 5 === 0 ? String(d.getDate()) : '');
+        return { label, days: [k], title: fmtDate(k, { weekday: 'long', day: 'numeric', month: 'short' }), s: summarize([k]) };
+      });
+    }
+    const weeks = [];
+    for (const k of days) {
+      if (!weeks.length || fromKey(k).getDay() === 1) weeks.push([]);
+      weeks[weeks.length - 1].push(k);
+    }
+    return weeks.map((w, i) => {
+      const first = fromKey(w[0]);
+      const newMonth = i === 0 || w.some(k => fromKey(k).getDate() === 1);
+      const monthDay = w.find(k => fromKey(k).getDate() === 1) || w[0];
+      return {
+        label: newMonth ? fmtDate(monthDay, { month: 'short' }) : String(first.getDate()),
+        days: w,
+        title: `${fmtDate(w[0], { day: 'numeric', month: 'short' })} – ${fmtDate(w[w.length - 1], { day: 'numeric', month: 'short' })} · average day`,
+        s: summarize(w),
+      };
+    });
+  }
+  function barsHtml(buckets) {
+    const W = 360, H = 220, L = 30, R = 4, T = 8, B = 20;
+    const pw = W - L - R, ph = H - T - B, slot = pw / buckets.length, bw = Math.min(28, slot * 0.72);
+    let svg = '';
+    for (const h of [0, 6, 12, 18, 24]) {
+      const y = T + ph - h / 24 * ph;
+      svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" /><text class="axis-label" x="${L - 5}" y="${y}" text-anchor="end" dominant-baseline="central">${h}h</text>`;
+    }
+    svg += '<g class="bars">';
+    buckets.forEach((b, i) => {
+      const x = L + i * slot + (slot - bw) / 2;
+      const scale = 1 / b.days.length; // average day, so every bar is out of 24h
+      let y = T + ph;
+      const parts = activities.filter(a => b.s.acts[a.id]).map(a => ({ ...a, min: b.s.acts[a.id] }))
+        .concat(Object.keys(b.s.acts).filter(id => !activities.some(a => a.id === id)).map(id => ({ ...actById(id), min: b.s.acts[id] })))
+        .concat([{ ...UNTRACKED, min: b.s.untracked }, { ...FUTURE, min: b.s.future }]);
+      for (const p of parts) {
+        if (p.min <= 0) continue;
+        const h = p.min * scale / DAY * ph;
+        y -= h;
+        svg += `<rect class="part${p.cls ? ' ' + p.cls : ''}${sel === p.id ? ' sel' : ''}" x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${bw.toFixed(2)}" height="${h.toFixed(2)}"${p.cls ? '' : ` fill="${p.color}"`} />`;
+      }
+      if (b.label) svg += `<text class="axis-label" x="${(x + bw / 2).toFixed(2)}" y="${H - 6}" text-anchor="middle">${esc(b.label)}</text>`;
+      svg += `<rect class="bar-hit${barSel === i ? ' sel' : ''}" data-bar="${i}" x="${(L + i * slot).toFixed(2)}" y="${T}" width="${slot.toFixed(2)}" height="${ph}" />`;
+    });
+    svg += '</g>';
+    let html = `<div class="chart-wrap${sel ? ' has-sel' : ''}" style="max-width:none"><svg viewBox="0 0 ${W} ${H}">${svg}</svg></div>`;
+    const b = buckets[barSel];
+    if (b) {
+      const n = b.days.length, useAvg = n > 1 && b.s.full.days > 0;
+      const rows = slices(b.s).filter(a => a.id !== FUTURE.id);
+      html += `<div class="bar-detail"><div class="head"><span>${esc(n > 1 && !useAvg ? b.title.replace('average day', 'so far') : b.title)}</span>
+          ${n === 1 ? `<button class="link-btn" data-action="open-day" data-day="${b.days[0]}">Open day ›</button>` : ''}</div>
+        ${b.s.cap === 0 ? '<div class="row"><span>Hasn\'t happened yet</span></div>' :
+          rows.map(a => `<div class="row"><span>${a.emoji ? a.emoji + ' ' : ''}${esc(a.name)}</span><span>${fmtDur(useAvg ? avg(b.s, a.id) : a.min)}</span></div>`).join('')}
+      </div>`;
+    }
+    return html;
+  }
+
+  function renderCharts(r, days, s) {
+    const el = $('chartsView');
+    if (s.tracked === 0 && s.cap === 0) {
+      el.innerHTML = `<div class="empty">This ${ui.period} hasn't started yet.</div>`;
+      return;
+    }
+    const hint = '<p class="hint" style="text-align:center;margin-top:8px">Tap a slice or a row to focus on one activity.</p>';
+    if (ui.period === 'day') {
+      el.innerHTML = `<div class="card"><h2>Around the clock</h2>${clockHtml(r.start, s)}${hint}</div>
+        <div class="card"><h2>Breakdown</h2>${legendHtml(s)}</div>`;
+      return;
+    }
+    const barsTitle = ui.period === 'quarter' ? 'Week by week <small>· average day</small>' : 'Day by day';
+    el.innerHTML = `<div class="card"><h2>Where the time went <small>· ${baseText(s)}</small></h2>${donutHtml(s)}${hint}</div>
+      <div class="card"><h2>Breakdown</h2>${legendHtml(s)}</div>
+      <div class="card"><h2>${barsTitle}</h2>${barsHtml(bucketsFor(days))}
+        <p class="hint" style="margin-bottom:0">Each bar is a full 24 hours. Tap one for details.</p></div>`;
+  }
+
+  // ---------- Saving time ----------
+  // Remove [s, e) on a date from every entry, trimming or splitting the ones it overlaps
+  function paint(list, date, s, e) {
+    return list.flatMap(x => {
+      if (x.date !== date || x.start >= e || x.end <= s) return [x];
+      const out = [];
+      if (x.start < s) out.push({ ...x, end: s });
+      if (x.end > e) out.push({ ...x, id: out.length ? uid() : x.id, start: e });
+      return out;
+    });
+  }
+  // segs: [{ date, start, end }] each within one day. Pieces of one span (e.g. a night's sleep) share a grp id
+  // so they're edited and deleted together. Returns false if the user backed out.
+  function commit(segs, act, note, editIds = []) {
+    let next = entries.filter(e => !editIds.includes(e.id));
+    const clashes = segs.flatMap(s => next.filter(e => e.date === s.date && e.start < s.end && e.end > s.start));
+    if (clashes.length) {
+      const list = clashes.slice(0, 3).map(e => `${actById(e.act).name} ${minToTime(e.start)}–${minToTime(e.end)}`).join(', ');
+      if (!confirm(`This overlaps ${list}${clashes.length > 3 ? '…' : ''}.\n\nReplace the overlapping time with this entry?`)) return false;
+      for (const s of segs) next = paint(next, s.date, s.start, s.end);
+    }
+    const grp = segs.length > 1 ? uid() : undefined;
+    segs.forEach((s, i) => next.push({ id: editIds[i] || uid(), date: s.date, start: s.start, end: s.end, act, note, ...(grp && { grp }) }));
+    entries = next;
+    ui.lastAct = act;
+    saveUi();
+    persist();
+    return true;
+  }
+
+  // ---------- Timer ----------
+  function startTimer(act) {
+    if (timer) stopTimer(true);
+    timer = { act, startedAt: Date.now() };
+    saveTimer();
+    render();
+  }
+  function stopTimer(switching) {
+    const start = new Date(timer.startedAt), end = new Date();
+    const segs = [];
+    let cur = start;
+    while (cur < end) {
+      const nextDay = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+      const stop = end < nextDay ? end : nextDay;
+      const s = cur.getHours() * 60 + cur.getMinutes();
+      const e = stop === nextDay ? DAY : stop.getHours() * 60 + stop.getMinutes();
+      if (e > s) segs.push({ date: toKey(cur), start: s, end: e });
+      cur = nextDay;
+    }
+    const act = timer.act;
+    if (!segs.length) {
+      timer = null;
+      saveTimer();
+      if (!switching) { toast('Under a minute, so nothing was saved'); render(); }
+      return;
+    }
+    if (!commit(segs, act, '')) return; // keep the timer running if they backed out of an overlap
+    timer = null;
+    saveTimer();
+    toast(`Saved ${fmtDur(segs.reduce((t, s) => t + s.end - s.start, 0))} of ${actById(act).name}`);
+    if (!switching) render();
+  }
+
+  // ---------- Add / edit modal ----------
+  let editingIds = [], pickedAct = null;
+  // How a span that crosses midnight is read against the chosen date: 'before' = started the previous evening
+  // (the date is the day you woke up), 'after' = runs into the next day. overnightSet: the user picked one.
+  let overnight = 'before', overnightSet = false;
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+  function renderPicker() {
+    $('actPicker').innerHTML = activities.map(chipHtml('pick', pickedAct)).join('');
+  }
+  function openEntry({ ids = [], date, start, end, act, note = '', night }) {
+    editingIds = ids;
+    pickedAct = act;
+    overnight = night || 'before';
+    overnightSet = !!night;
+    $('entryTitle').textContent = ids.length ? 'Edit time' : 'Log time';
+    $('entryDelete').style.display = ids.length ? '' : 'none';
+    $('entryDate').value = date;
+    $('entryStart').value = minToTime(start);
+    $('entryEnd').value = minToTime(end % DAY);
+    $('entryNote').value = note;
+    renderPicker();
+    updateDurHint();
+    openModal('entryModal');
+  }
+  // An overnight span is stored as two entries; open both together when either is tapped
+  function editEntry(e) {
+    const g = e.grp ? entries.filter(x => x.grp === e.grp).sort((a, b) => a.date.localeCompare(b.date)) : [];
+    if (g.length === 2 && g[0].end === DAY && g[1].start === 0 && addDays(g[0].date, 1) === g[1].date) {
+      openEntry({ ids: g.map(x => x.id), date: g[1].date, start: g[0].start, end: g[1].end, act: e.act, note: e.note, night: 'before' });
+    } else {
+      openEntry({ ids: [e.id], date: e.date, start: e.start, end: e.end, act: e.act, note: e.note });
+    }
+  }
+  const round5 = m => Math.round(m / 5) * 5;
+  function openAdd() {
+    const date = ui.period === 'day' ? ui.anchor : todayKey();
+    const list = dayEntries(date);
+    const lastEnd = list.length ? list[list.length - 1].end : null;
+    let start, end;
+    if (date === todayKey()) {
+      end = Math.min(round5(nowMin()), DAY - 5);
+      start = lastEnd !== null && lastEnd < end ? lastEnd : Math.max(0, end - 60);
+    } else {
+      start = lastEnd !== null && lastEnd < DAY ? lastEnd : 0;
+      end = Math.min(start + 60, DAY);
+    }
+    openEntry({ date, start, end, act: activities.some(a => a.id === ui.lastAct) ? ui.lastAct : activities[0]?.id });
+  }
+  // Turn the form into per-day pieces. Ending before the start time means the span crosses midnight.
+  function formSegments() {
+    const date = $('entryDate').value;
+    const s = timeToMin($('entryStart').value), e = timeToMin($('entryEnd').value);
+    if (e > s) return [{ date, start: s, end: e }];
+    if (e === 0) return [{ date, start: s, end: DAY }]; // ends exactly at midnight
+    const first = overnight === 'before' ? addDays(date, -1) : date;
+    return [{ date: first, start: s, end: DAY }, { date: addDays(first, 1), start: 0, end: e }];
+  }
+  function updateDurHint() {
+    const date = $('entryDate').value, s = $('entryStart').value, e = $('entryEnd').value;
+    const toggle = $('overnightToggle');
+    toggle.hidden = true;
+    if (!date || !s || !e) { $('durHint').textContent = ''; return; }
+    const a = timeToMin(s), b = timeToMin(e);
+    if (a === b) { $('durHint').innerHTML = 'Start and end are the same.'; return; }
+    // Until the user picks: logging in the morning means last night, a start still ahead of us today means tonight
+    if (!overnightSet) overnight = date === todayKey() && a <= nowMin() ? 'after' : 'before';
+    const segs = formSegments();
+    const d = segs.reduce((t, x) => t + x.end - x.start, 0);
+    if (segs.length === 1) { $('durHint').innerHTML = `<b>${fmtDur(d)}</b>`; return; }
+    toggle.hidden = false;
+    toggle.querySelectorAll('button').forEach(x => x.classList.toggle('active', x.dataset.overnight === overnight));
+    const day = k => esc(fmtDate(k, { weekday: 'short', day: 'numeric', month: 'short' }));
+    $('durHint').innerHTML = `${day(segs[0].date)} ${s} → ${day(segs[1].date)} ${e} · <b>${fmtDur(d)}</b>`;
+  }
+  $('entryStart').addEventListener('input', updateDurHint);
+  $('entryEnd').addEventListener('input', updateDurHint);
+  $('entryDate').addEventListener('input', updateDurHint);
+  $('overnightToggle').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-overnight]');
+    if (!b) return;
+    overnight = b.dataset.overnight;
+    overnightSet = true;
+    updateDurHint();
+  });
+  $('actPicker').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-act]');
+    if (!b) return;
+    pickedAct = b.dataset.act;
+    renderPicker();
+  });
+  $('entryForm').addEventListener('submit', ev => {
+    ev.preventDefault();
+    if (!pickedAct) { toast('Pick an activity'); return; }
+    const date = $('entryDate').value;
+    if ($('entryStart').value === $('entryEnd').value) { toast('Start and end are the same'); return; }
+    if (!commit(formSegments(), pickedAct, $('entryNote').value.trim(), editingIds)) return;
+    closeModal('entryModal');
+    // Make sure the saved time is on screen
+    const r = periodRange();
+    if (date < r.start || date > r.end) ui.anchor = date;
+    render();
+  });
+  $('entryDelete').addEventListener('click', () => {
+    if (!editingIds.length || !confirm('Delete this entry?')) return;
+    entries = entries.filter(e => !editingIds.includes(e.id));
+    persist();
+    closeModal('entryModal');
+    render();
+  });
+
+  // ---------- Clicks in the views ----------
+  function handleViewClick(ev) {
+    const selEl = ev.target.closest('[data-sel]');
+    if (selEl) {
+      sel = sel === selEl.dataset.sel ? null : selEl.dataset.sel;
+      render();
+      return;
+    }
+    const bar = ev.target.closest('[data-bar]');
+    if (bar) {
+      barSel = barSel === +bar.dataset.bar ? null : +bar.dataset.bar;
+      render();
+      return;
+    }
+    const t = ev.target.closest('[data-action]');
+    if (!t) return;
+    const action = t.dataset.action;
+    if (action === 'edit') {
+      const e = entries.find(x => x.id === t.dataset.id);
+      if (e) editEntry(e);
+    } else if (action === 'fill' || action === 'fill-first') {
+      let a = +t.dataset.start, b = +t.dataset.end;
+      if (action === 'fill-first') {
+        // Tapped the strip's untracked background: fill the gap under the finger
+        const k = ui.anchor, cap = capOf(k), rect = t.getBoundingClientRect();
+        const at = Math.max(0, Math.min(cap - 1, Math.round((ev.clientX - rect.left) / rect.width * cap)));
+        a = 0; b = cap;
+        for (const e of dayEntries(k)) {
+          if (e.end <= at) a = Math.max(a, e.end);
+          else if (e.start > at) { b = Math.min(b, e.start); break; }
+        }
+      }
+      openEntry({ date: ui.anchor, start: a, end: b, act: activities.some(x => x.id === ui.lastAct) ? ui.lastAct : activities[0]?.id });
+    } else if (action === 'open-day') {
+      ui.anchor = t.dataset.day;
+      ui.period = 'day';
+      ui.tab = 'log';
+      barSel = null;
+      saveUi();
+      render();
+      window.scrollTo(0, 0);
+    } else if (action === 'log-sleep') {
+      const { bed, wake } = usualSleep();
+      openEntry({ date: todayKey(), start: bed, end: wake, act: sleepAct().id, night: 'before' });
+    } else if (action === 'start-timer') {
+      startTimer(t.dataset.act);
+    } else if (action === 'stop-timer') {
+      stopTimer(false);
+    }
+  }
+  $('logView').addEventListener('click', handleViewClick);
+  $('chartsView').addEventListener('click', handleViewClick);
+  $('periodPills').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-period]');
+    if (b) setPeriod(b.dataset.period);
+  });
+  $('tabPills').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-tab]');
+    if (!b) return;
+    ui.tab = b.dataset.tab;
+    saveUi();
+    render();
+  });
+
+  // ---------- Activities manager ----------
+  function openActs() {
+    renderActs();
+    openModal('actsModal');
+  }
+  function renderActs() {
+    const used = {};
+    for (const e of entries) used[e.act] = (used[e.act] || 0) + 1;
+    $('actList').innerHTML = activities.map(a => `<div class="act-row" data-id="${a.id}">
+        <input class="emoji" value="${esc(a.emoji)}" maxlength="8" data-field="emoji" aria-label="Emoji">
+        <input class="nm" value="${esc(a.name)}" data-field="name" aria-label="Name">
+        <input type="color" value="${a.color}" data-field="color" aria-label="Colour">
+        <button type="button" class="del" data-del="${a.id}" title="${used[a.id] ? `Used by ${used[a.id]} entries` : 'Delete'}">🗑</button>
+      </div>`).join('');
+  }
+  $('actList').addEventListener('change', ev => {
+    const f = ev.target.dataset.field;
+    const a = activities.find(x => x.id === ev.target.closest('[data-id]')?.dataset.id);
+    if (!f || !a) return;
+    const v = ev.target.value.trim();
+    if (f === 'name' && !v) { ev.target.value = a.name; return; }
+    a[f] = v;
+    persist();
+    render();
+  });
+  $('actList').addEventListener('click', ev => {
+    const id = ev.target.closest('[data-del]')?.dataset.del;
+    if (!id) return;
+    const n = entries.filter(e => e.act === id).length;
+    if (n) { toast(`${n} ${n === 1 ? 'entry uses' : 'entries use'} it. Rename it instead.`); return; }
+    if (timer?.act === id) { toast('Stop the timer first'); return; }
+    activities = activities.filter(a => a.id !== id);
+    persist();
+    renderActs();
+    render();
+  });
+  $('newActForm').addEventListener('submit', ev => {
+    ev.preventDefault();
+    const name = $('newActName').value.trim();
+    if (!name) return;
+    activities.push({ id: uid(), name, emoji: $('newActEmoji').value.trim(), color: $('newActColor').value });
+    persist();
+    $('newActName').value = '';
+    renderActs();
+    render();
+  });
+
+  // ---------- Theme ----------
+  function applyTheme(t) {
+    if (t === 'light' || t === 'dark') {
+      document.documentElement.dataset.theme = t;
+      localStorage.setItem(KEYS.theme, t);
+    } else {
+      delete document.documentElement.dataset.theme;
+      localStorage.removeItem(KEYS.theme);
+    }
+    const cur = document.documentElement.dataset.theme || 'system';
+    document.querySelectorAll('#themeToggle button').forEach(b => b.classList.toggle('active', b.dataset.themeOpt === cur));
+  }
+  $('themeToggle').addEventListener('click', ev => {
+    const b = ev.target.closest('[data-theme-opt]');
+    if (b) applyTheme(b.dataset.themeOpt);
+  });
+
+  // ---------- Backup ----------
+  function exportData() {
+    const blob = new Blob([JSON.stringify({ app: 'dayManager', version: 1, exportedAt: new Date().toISOString(), activities, entries }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `day-manager-${todayKey()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function importData(ev) {
+    const file = ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    file.text().then(txt => {
+      const data = JSON.parse(txt);
+      const okEntry = e => e && typeof e.id === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(e.date) &&
+        Number.isInteger(e.start) && Number.isInteger(e.end) && e.start >= 0 && e.end <= DAY && e.start < e.end && typeof e.act === 'string';
+      const okAct = a => a && typeof a.id === 'string' && typeof a.name === 'string' && typeof a.color === 'string';
+      if (!Array.isArray(data.entries) || !Array.isArray(data.activities) || !data.entries.every(okEntry) || !data.activities.every(okAct)) {
+        throw new Error('bad file');
+      }
+      if (!confirm(`Replace everything on this device with ${data.entries.length} entries from the backup?`)) return;
+      activities = data.activities;
+      entries = data.entries;
+      persist();
+      closeModal('settingsModal');
+      render();
+      toast('Backup imported');
+    }).catch(() => toast('That file isn\'t a Day Manager backup'));
+  }
+
+  // ---------- Start ----------
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') document.querySelectorAll('.modal-bg.open').forEach(m => m.classList.remove('open'));
+  });
+  // Tick the timer every second; redraw everything when the minute changes so "now" keeps moving
+  let lastMinute = nowMin(), lastDay = todayKey();
+  setInterval(() => {
+    if (timer && $('timerClock')) $('timerClock').textContent = timerText();
+    if (nowMin() !== lastMinute) {
+      // Follow the date over midnight if they were looking at today
+      if (todayKey() !== lastDay && ui.anchor === lastDay) ui.anchor = todayKey();
+      lastMinute = nowMin();
+      lastDay = todayKey();
+      render();
+    }
+  }, 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+
+  reindex();
+  applyTheme(document.documentElement.dataset.theme || 'system');
+  render();
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
