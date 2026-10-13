@@ -6,4 +6,4 @@ then look at the split for a day, week, month or quarter. Anything not logged sh
 Single-file web app (`index.html`), installable as a PWA, works offline. Data stays in the browser's localStorage;
 use Settings → Export backup to keep a copy.
 
-Open `index.html` directly, or serve the folder (e.g. `python3 -m http.server`) to get offline/install support.
+Open `index.html` directly, or serve the folder (e.g. `python3 -m http.server`) to get offline/install support..
